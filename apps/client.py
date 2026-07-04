@@ -15,13 +15,16 @@ BUFFER_SIZE = 65536
 
 
 class MicrovmManager:
-    def __init__(self, image_arn: str, region: str = "ap-northeast-1"):
+    def __init__(self, image_arn: str | None, region: str = "ap-northeast-1"):
         self.client = boto3.client("lambda-microvms", region_name=region)
         self.image_arn = image_arn
         self.microvm_id: str | None = None
         self.endpoint: str | None = None
+        self.owner = False
 
     def start(self) -> str:
+        assert isinstance(self.image_arn, str)
+
         response = self.client.run_microvm(
             imageIdentifier=self.image_arn,
             maximumDurationInSeconds=28800,
@@ -33,6 +36,8 @@ class MicrovmManager:
         )
         self.microvm_id = response["microvmId"]
         self.endpoint = response["endpoint"]
+
+        self.owner = True
 
         logger.info(f"MicroVM starting: {self.microvm_id}")
         logger.info("Waiting for MicroVM to be RUNNING...")
@@ -61,8 +66,24 @@ class MicrovmManager:
         )
         return response["authToken"]["X-aws-proxy-auth"]
 
+    def connect(self, microvm_id: str) -> str:
+        self.microvm_id = microvm_id
+
+        response = self.client.get_microvm(microvmIdentifier=microvm_id)
+        state = response["state"]
+
+        if state != "RUNNING":
+            raise RuntimeError(f"MicroVM is not running: {state}")
+
+        self.endpoint = response["endpoint"]
+        logger.info(f"Connected to existing MicroVM: {self.endpoint}")
+
+        return self.endpoint
+
     def stop(self):
-        if self.microvm_id:
+        assert isinstance(self.microvm_id, str)
+
+        if self.owner:
             self.client.terminate_microvm(microvmIdentifier=self.microvm_id)
             logger.info(f"MicroVM terminated: {self.microvm_id}")
 
@@ -149,16 +170,24 @@ class Proxy:
 def main():
     parser = argparse.ArgumentParser(description="Minecraft over Lambda MicroVMs")
 
-    parser.add_argument("--image-arn", required=True)
+    parser.add_argument("--image-arn", default=None)
+    parser.add_argument("--microvm-id", default=None)
     parser.add_argument("--region", default="ap-northeast-1")
     parser.add_argument("--port", "-p", type=int, default=25565)
     parser.add_argument("--listen", "-l", default="127.0.0.1")
 
     args = parser.parse_args()
 
+    if not args.image_arn and not args.microvm_id:
+        parser.error("--image-arn or --microvm-id is required")
+
     manager = MicrovmManager(args.image_arn, args.region)
 
-    endpoint = manager.start()
+    if args.microvm_id:
+        endpoint = manager.connect(args.microvm_id)
+    else:
+        endpoint = manager.start()
+
     token = manager.create_token(port=8080)
 
     ws_url = f"wss://{endpoint}"
