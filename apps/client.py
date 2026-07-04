@@ -1,8 +1,10 @@
 import argparse
 import asyncio
 import logging
+import time
 from asyncio import StreamReader, StreamWriter
 
+import boto3
 import websockets
 from websockets import Subprotocol
 
@@ -10,6 +12,59 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 BUFFER_SIZE = 65536
+
+
+class MicrovmManager:
+    def __init__(self, image_arn: str, region: str = "ap-northeast-1"):
+        self.client = boto3.client("lambda-microvms", region_name=region)
+        self.image_arn = image_arn
+        self.microvm_id: str | None = None
+        self.endpoint: str | None = None
+
+    def start(self) -> str:
+        response = self.client.run_microvm(
+            imageIdentifier=self.image_arn,
+            maximumDurationInSeconds=28800,
+            idlePolicy={
+                "autoResumeEnabled": True,
+                "maxIdleDurationSeconds": 600,
+                "suspendedDurationSeconds": 3600,
+            },
+        )
+        self.microvm_id = response["microvmId"]
+        self.endpoint = response["endpoint"]
+
+        logger.info(f"MicroVM starting: {self.microvm_id}")
+        logger.info("Waiting for MicroVM to be RUNNING...")
+
+        while True:
+            response = self.client.get_microvm(microvmIdentifier=self.microvm_id)
+            state = response["state"]
+
+            if state == "RUNNING":
+                break
+            if state in ("TERMINATING", "TERMINATED"):
+                raise RuntimeError(f"MicroVM failed: {response.get('stateReason')}")
+            time.sleep(5)
+
+        logger.info(f"MicroVM is running: {self.endpoint}")
+
+        return self.endpoint
+
+    def create_token(self, port: int = 8080) -> str:
+        assert isinstance(self.microvm_id, str)
+
+        response = self.client.create_microvm_auth_token(
+            microvmIdentifier=self.microvm_id,
+            allowedPorts=[{"port": port}],
+            expirationInMinutes=60,
+        )
+        return response["authToken"]["X-aws-proxy-auth"]
+
+    def stop(self):
+        if self.microvm_id:
+            self.client.terminate_microvm(microvmIdentifier=self.microvm_id)
+            logger.info(f"MicroVM terminated: {self.microvm_id}")
 
 
 class Proxy:
@@ -91,21 +146,36 @@ class Proxy:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="TCP to WebSocket proxy for Minecraft over Lambda MicroVMs",
-    )
+    parser = argparse.ArgumentParser(description="Minecraft over Lambda MicroVMs")
 
-    parser.add_argument("url", help="WebSocket URL (ws://.. or wss://..)")
+    parser.add_argument("--image-arn", required=True)
+    parser.add_argument("--region", default="ap-northeast-1")
     parser.add_argument("--port", "-p", type=int, default=25565)
     parser.add_argument("--listen", "-l", default="127.0.0.1")
-    parser.add_argument("--subproto", "-s", default="binary")
 
     args = parser.parse_args()
 
-    subprotocols = [Subprotocol(args.subproto)] if args.subproto else None
-    proxy = Proxy(args.port, args.listen, args.url, subprotocols)
+    manager = MicrovmManager(args.image_arn, args.region)
 
-    asyncio.run(proxy.run())
+    endpoint = manager.start()
+    token = manager.create_token(port=8080)
+
+    ws_url = f"wss://{endpoint}"
+    proxy = Proxy(
+        port=args.port,
+        addr=args.listen,
+        url=ws_url,
+        subprotocols=[
+            Subprotocol("lambda-microvms"),
+            Subprotocol(f"lambda-microvms.authentication.{token}"),
+            Subprotocol("lambda-microvms.port.8080"),
+        ],
+    )
+
+    try:
+        asyncio.run(proxy.run())
+    finally:
+        manager.stop()
 
 
 if __name__ == "__main__":
