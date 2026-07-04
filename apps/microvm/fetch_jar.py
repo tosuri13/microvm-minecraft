@@ -9,7 +9,7 @@ MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json
 def fetch(version: str, output: Path):
     output.mkdir(parents=True, exist_ok=True)
 
-    manifest = json.loads(urlopen(MANIFEST_URL))
+    manifest = json.load(urlopen(MANIFEST_URL))
     versions = manifest["versions"]
     version_url = next(v["url"] for v in versions if v["id"] == version)
 

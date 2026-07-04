@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.139.0",
     "uvicorn[standard]>=0.49.0",
     "websockets>=16.0",
+    "websockify>=0.13.0",
 ]
 
 [dependency-groups]

@@ -108,8 +108,8 @@ class Proxy:
                 sender = self.copy(lambda: reader.read(BUFFER_SIZE), ws.send)
                 tcp_to_ws = asyncio.create_task(sender)
 
-                reciever = self.copy(ws.recv, writer.write)
-                ws_to_tcp = asyncio.create_task(reciever)
+                receiver = self.copy(ws.recv, writer.write)
+                ws_to_tcp = asyncio.create_task(receiver)
 
                 done, pending = await asyncio.wait(
                     [tcp_to_ws, ws_to_tcp],
@@ -129,6 +129,7 @@ class Proxy:
 
         writer.close()
         await writer.wait_closed()
+
         logger.info(f"{peer} closed")
 
     async def run(self):

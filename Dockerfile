@@ -5,7 +5,7 @@ ARG TARGETARCH=arm64
 
 ARG EASY_ADD_VERSION=0.8.14
 ADD https://github.com/itzg/easy-add/releases/download/${EASY_ADD_VERSION}/easy-add_${TARGETOS}_${TARGETARCH} /usr/bin/easy-add
-RUN chmod -x /usr/bin/easy-add
+RUN chmod +x /usr/bin/easy-add
 
 ARG RCON_CLI_VERSION=1.7.6
 RUN easy-add --var os=${TARGETOS} --var arch=${TARGETARCH} \

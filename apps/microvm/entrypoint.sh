@@ -1,4 +1,4 @@
-#!usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 websockify ${WS_PORT:-8080} localhost:${MINECRAFT_PORT:-25565} &
