@@ -149,7 +149,10 @@ class Proxy:
             logger.exception(f"{peer} connection failed")
 
         writer.close()
-        await writer.wait_closed()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
 
         logger.info(f"{peer} closed")
 
