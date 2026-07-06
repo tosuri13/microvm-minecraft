@@ -207,6 +207,8 @@ def main():
 
     try:
         asyncio.run(proxy.run())
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
     finally:
         manager.stop()
 
